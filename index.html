@@ -1,4 +1,3 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Cue Club</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -42,6 +41,22 @@
     line-height: 0.88; letter-spacing: 0.01em; text-transform: uppercase; text-wrap: balance;
   }
   .sub { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  .sub.who { margin-top: 2px; }
+  .linkbtn { background: none; border: 0; padding: 0; margin-left: 8px; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .linkbtn:hover { color: var(--fg); }
+  .modal {
+    position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(6, 12, 10, 0.86);
+    padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  }
+  .dialog { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; display: grid; gap: 12px; }
+  .dialog h2 { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: 42px; line-height: 0.95; text-transform: uppercase; }
+  .dialog p { margin: 0; color: var(--muted); }
+  .dialog input[type="text"] {
+    width: 100%; padding: 12px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+    font: inherit; font-size: 16px;
+  }
+  .dialog .err { color: var(--danger); font-size: 13px; }
+  .dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
   .ladder { display: grid; gap: 6px; }
   .ladder-label { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
   .levels { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -148,6 +163,7 @@
     <div class="brand">
       <h1>Cue Club</h1>
       <p class="sub">Eight-ball against the house, rack after rack.</p>
+      <p class="sub who" id="who" hidden>Logged in as: <span id="whoName"></span><button type="button" class="linkbtn" id="switchName">Switch</button></p>
     </div>
     <div class="ladder">
       <div class="ladder-label" id="ladder-label">Opponent level</div>
@@ -157,7 +173,7 @@
 
   <section class="players" aria-label="Scoreboard">
     <div class="player" id="pl0">
-      <div class="p-head"><span class="p-name">You</span><span class="p-state" id="st0"></span></div>
+      <div class="p-head"><span class="p-name" id="pName0">You</span><span class="p-state" id="st0"></span></div>
       <div class="p-group" id="gr0"></div>
       <div class="chips" id="ch0"></div>
     </div>
@@ -204,6 +220,20 @@
     <button type="button" class="ghost" id="newrack">New rack</button>
   </div>
   <p class="tips">Move the pointer (or drag a finger) over the table to aim. Arrow keys fine-tune the angle and power, Space shoots. After a foul the next shooter can drag the cue ball anywhere.</p>
+</div>
+
+<div class="modal" id="nameModal" role="dialog" aria-modal="true" aria-labelledby="nameTitle" hidden>
+  <form class="dialog" id="nameForm" autocomplete="off">
+    <h2 id="nameTitle">Who is playing?</h2>
+    <p>Pick a name for your scoreboard card. It stays on this device.</p>
+    <label class="lbl" for="nameInput">Your name</label>
+    <input type="text" id="nameInput" maxlength="20" placeholder="Julia" spellcheck="false">
+    <p class="err" id="nameErr" hidden>Type a name to continue.</p>
+    <div class="actions">
+      <button type="button" class="ghost" id="nameCancel" hidden>Cancel</button>
+      <button type="submit" class="primary">Start playing</button>
+    </div>
+  </form>
 </div>
 
 <script>
@@ -1117,7 +1147,7 @@ if (typeof module !== 'undefined' && module.exports) {
   window.addEventListener('keydown', function (e) {
     var t = e.target, tag = t && t.tagName;
     if (!humanTurn()) return;
-    if (tag === 'INPUT' && t.type === 'range') return;
+    if (tag === 'INPUT') return;
     if (e.key === 'ArrowLeft') { aimAngle -= e.shiftKey ? 0.012 : 0.003; e.preventDefault(); }
     else if (e.key === 'ArrowRight') { aimAngle += e.shiftKey ? 0.012 : 0.003; e.preventDefault(); }
     else if (e.key === 'ArrowUp') { setPower(power + 0.03); e.preventDefault(); }
@@ -1148,11 +1178,41 @@ if (typeof module !== 'undefined' && module.exports) {
     requestAnimationFrame(frame);
   }
 
+  /* ---------- player name ---------- */
+  var playerName = '';
+  try { playerName = localStorage.getItem('cueclub-name') || ''; } catch (e) { playerName = ''; }
+  function applyName() {
+    $('whoName').textContent = playerName;
+    $('who').hidden = !playerName;
+    $('pName0').textContent = playerName || 'You';
+  }
+  function openName(cancelable) {
+    $('nameCancel').hidden = !cancelable;
+    $('nameInput').value = playerName;
+    $('nameErr').hidden = true;
+    $('nameModal').hidden = false;
+    setTimeout(function () { $('nameInput').focus(); }, 30);
+  }
+  function closeName() { $('nameModal').hidden = true; }
+  $('nameForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var v = $('nameInput').value.replace(/\s+/g, ' ').trim().slice(0, 20);
+    if (!v) { $('nameErr').hidden = false; $('nameInput').focus(); return; }
+    playerName = v;
+    try { localStorage.setItem('cueclub-name', v); } catch (er) {}
+    applyName(); closeName();
+  });
+  $('nameCancel').addEventListener('click', closeName);
+  $('switchName').addEventListener('click', function () { openName(true); });
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('nameModal').hidden && !$('nameCancel').hidden) closeName();
+  });
+  applyName();
+  if (!playerName) openName(false);
+
   window.addEventListener('resize', resize);
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv.parentElement);
   resize(); updateLevels(); updateTrays(); setControls(); setStatus(turnLine());
   requestAnimationFrame(frame);
 })();
 </script>
-
-</body></html>
